@@ -104,7 +104,7 @@
     .guru-name { font-size: 0.65rem; color: var(--gray); pointer-events: none; line-height: 1.1;}
     .time-badge { font-size:0.6rem; color:var(--gray); display:block; margin-top:4px; pointer-events: none; }
     
-    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 16px; border-radius: var(--radius-sm); color: white; transform: translateX(400px); transition: 0.3s; z-index: 4000; display: flex; gap: 8px; font-size: 0.85rem;}
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 16px; border-radius: var(--radius-sm); color: white; transform: translateX(120%); transition: 0.3s; z-index: 4000; display: flex; gap: 8px; font-size: 0.85rem;}
     .toast.show { transform: translateX(0); }
     .toast.success { background: var(--success); }
     .toast.error { background: var(--danger); }
@@ -327,11 +327,37 @@
       else if(page === 'export') renderExport(container);
     }
 
+    // Tambahkan variabel global ini tepat di atas fungsi showToast
+    let toastTimer;
+
     function showToast(msg, type) {
       const toast = document.getElementById('toast');
-      toast.className = `toast show ${type}`;
-      toast.innerHTML = `<i class="fas fa-${type==='success'?'check':(type==='warning'?'exclamation-triangle':'exclamation')}-circle"></i> ${msg}`;
-      setTimeout(() => toast.classList.remove('show'), 3000);
+      
+      // Bersihkan timer lama jika ada notifikasi baru yang muncul (mencegah tabrakan timer)
+      if (toastTimer) {
+          clearTimeout(toastTimer);
+      }
+
+      // Reset class agar tidak ada konflik style sebelumnya
+      toast.className = `toast ${type}`;
+      
+      // Isi pesan dan tambahkan tombol close (x) manual
+      toast.innerHTML = `
+          <i class="fas fa-${type==='success'?'check':(type==='warning'?'exclamation-triangle':'exclamation')}-circle"></i> 
+          <span style="flex:1; display:flex; align-items:center;">${msg}</span>
+          <button onclick="document.getElementById('toast').classList.remove('show')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; line-height:1; padding: 0 0 0 8px;">&times;</button>
+      `;
+
+      // 'Force reflow' trik agar animasi transisi (geser) langsung mereset ulang dengan mulus
+      void toast.offsetWidth;
+
+      // Munculkan notifikasi ke layar
+      toast.classList.add('show');
+
+      // Sembunyikan otomatis secara stabil setelah 4 detik
+      toastTimer = setTimeout(() => {
+          toast.classList.remove('show');
+      }, 4000);
     }
 
     // ==========================================
@@ -581,21 +607,66 @@
         </div>`;
     }
 
-    window.tambahBarisPenugasan = function(mVal='', kArr=[], jVal=2) {
-      const container = document.getElementById('penugasan-container');
-      const rowId = 'p-' + Date.now() + Math.random().toString().substr(2,5);
-      let kelasCheckboxes = AppState.data.kelas.map(k => `<label class="checkbox-item"><input type="checkbox" class="cb-kelas-${rowId}" value="${k.nama}" ${kArr.includes(k.nama)?'checked':''}> ${k.nama}</label>`).join('');
-      let optMapel = AppState.data.mapel.map(m => `<option value="${m.nama}" ${mVal===m.nama?'selected':''}>${m.tingkat ? `[Tk.${m.tingkat}] ` : ''}${m.nama}</option>`).join('');
+    window.updateKelasBerdasarkanMapel = function(rowId, kArr=[]) {
+        const sel = document.querySelector(`.sel-mapel-${rowId}`);
+        const mapelId = sel.value; // Sekarang baca ID, bukan nama
+        const cbGroup = document.getElementById(`cb-group-${rowId}`);
+        const jamInput = document.querySelector(`.input-jam-${rowId}`);
 
-      const rowHtml = `
-        <div class="penugasan-row" id="${rowId}" style="background:white; padding:12px; border:1px solid #cbd5e1; border-radius:6px; margin-bottom:10px; position:relative;">
-          <button type="button" onclick="document.getElementById('${rowId}').remove()" style="position:absolute; top:8px; right:8px; color:red; border:none; background:none; cursor:pointer;" title="Hapus"><i class="fas fa-times"></i></button>
-          <div class="form-group"><label class="form-label">Mata Pelajaran</label><select class="form-control sel-mapel-${rowId}"><option value="">-- Pilih Mapel --</option>${optMapel}</select></div>
-          <div class="form-group"><label class="form-label">Kelas yang Diajar (Centang)</label><div class="checkbox-group">${kelasCheckboxes || '<span style="color:red;font-size:11px;">Isi data kelas dulu</span>'}</div></div>
-          <div class="form-group" style="margin-bottom:0;"><label class="form-label">Jam per Kelas (1x Pertemuan)</label><input type="number" class="form-control input-jam-${rowId}" value="${jVal}"></div>
-        </div>`;
-      container.insertAdjacentHTML('beforeend', rowHtml);
-    }
+        if(!mapelId) {
+            cbGroup.innerHTML = '<span style="color:var(--gray);font-size:11px;">Pilih mapel terlebih dahulu</span>';
+            return;
+        }
+
+        const mapelObj = AppState.data.mapel.find(m => String(m.id) === String(mapelId));
+        if(mapelObj) {
+            const tingkat = mapelObj.tingkat;
+            const kelasValid = AppState.data.kelas.filter(k => String(k.tingkat).trim() === String(tingkat).trim());
+
+            if(kelasValid.length === 0) {
+                cbGroup.innerHTML = `<span style="color:red;font-size:11px;">Tidak ada kelas untuk tingkat ${tingkat}</span>`;
+            } else {
+                cbGroup.innerHTML = kelasValid.map(k => `<label class="checkbox-item"><input type="checkbox" class="cb-kelas-${rowId}" value="${k.nama}" ${kArr.includes(k.nama)?'checked':''}> ${k.nama}</label>`).join('');
+            }
+
+            jamInput.max = mapelObj.jamPerMinggu;
+            if(kArr.length === 0) {
+                jamInput.value = mapelObj.jamPerMinggu || 2;
+            }
+        }
+    }
+
+    window.tambahBarisPenugasan = function(mVal='', kArr=[], jVal=null) {
+      const container = document.getElementById('penugasan-container');
+      const rowId = 'p-' + Date.now() + Math.random().toString().substr(2,5);
+
+      // Cari ID Mapel yang tepat saat mode Edit (mencocokkan nama dan tingkat kelas)
+      let mIdTertentu = '';
+      if(mVal && kArr.length > 0) {
+          const kObj = AppState.data.kelas.find(k => k.nama === kArr[0]);
+          if(kObj) {
+              const mapelCocok = AppState.data.mapel.find(m => m.nama === mVal && String(m.tingkat).trim() === String(kObj.tingkat).trim());
+              if(mapelCocok) mIdTertentu = mapelCocok.id;
+          }
+      } else if (mVal) {
+          const mapelCocok = AppState.data.mapel.find(m => m.nama === mVal);
+          if(mapelCocok) mIdTertentu = mapelCocok.id;
+      }
+
+      // Value dropdown sekarang menggunakan ID
+      let optMapel = AppState.data.mapel.map(m => `<option value="${m.id}" ${mIdTertentu === m.id ? 'selected' : ''}>${m.tingkat ? `[Tk.${m.tingkat}] ` : ''}${m.nama}</option>`).join('');
+
+      const rowHtml = `
+        <div class="penugasan-row" id="${rowId}" style="background:white; padding:12px; border:1px solid #cbd5e1; border-radius:6px; margin-bottom:10px; position:relative;">
+          <button type="button" onclick="document.getElementById('${rowId}').remove()" style="position:absolute; top:8px; right:8px; color:red; border:none; background:none; cursor:pointer;" title="Hapus"><i class="fas fa-times"></i></button>
+          <div class="form-group"><label class="form-label">Mata Pelajaran</label><select class="form-control sel-mapel-${rowId}" onchange="updateKelasBerdasarkanMapel('${rowId}')"><option value="">-- Pilih Mapel --</option>${optMapel}</select></div>
+          <div class="form-group"><label class="form-label">Kelas yang Diajar (Centang)</label><div class="checkbox-group" id="cb-group-${rowId}"></div></div>
+          <div class="form-group" style="margin-bottom:0;"><label class="form-label">Jam per Kelas (1x Pertemuan)</label><input type="number" class="form-control input-jam-${rowId}" value="${jVal !== null ? jVal : 2}" min="1"></div>
+        </div>`;
+      container.insertAdjacentHTML('beforeend', rowHtml);
+      
+      updateKelasBerdasarkanMapel(rowId, kArr);
+    }
 
     function openModal(type, id = null) {
       AppState.editId = id; AppState.editType = type;
@@ -655,60 +726,66 @@
         newData.kode = document.getElementById('f-kode').value.trim(); 
         newData.nama = document.getElementById('f-nama').value.trim(); 
         newData.tingkat = document.getElementById('f-tingkat').value.trim();
-      } else if(type === 'guru') { 
-        newData.kode = document.getElementById('f-kode-guru').value || '-';
-        newData.nama = document.getElementById('f-nama').value;
+      } else if(type === 'guru') {
+      newData.kode = document.getElementById('f-kode-guru').value || '-';
+      newData.nama = document.getElementById('f-nama').value;
+      const hariDipilih = Array.from(document.querySelectorAll('.cb-hari:checked')).map(cb => cb.value);
+      
+      if(hariDipilih.length === 0) return showToast('Pilih setidaknya 1 hari ketersediaan!', 'warning');
+      newData.hariMengajar = hariDipilih.join(', ');
 
-        const hariDipilih = Array.from(document.querySelectorAll('.cb-hari:checked')).map(cb => cb.value); 
-        if(hariDipilih.length === 0) return showToast('Pilih setidaknya 1 hari ketersediaan!', 'warning'); 
-        newData.hariMengajar = hariDipilih.join(', '); 
+      let penugasan = [];
+      let isValid = true;
+      let pesanError = "";
 
-        let penugasan = [];
-        let isValid = true;
-        let pesanError = "";
+      // Menggunakan for loop biasa agar bisa di-break (Hard Stop)
+      // Menggunakan for loop biasa agar bisa di-break (Hard Stop)
+      const rows = document.querySelectorAll('.penugasan-row');
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const mapelId = row.querySelector(`.sel-mapel-${row.id}`).value.trim(); // Baca berdasarkan ID
+        const kelasArr = Array.from(row.querySelectorAll(`.cb-kelas-${row.id}:checked`)).map(cb => cb.value.trim());
+        const jam = parseInt(row.querySelector(`.input-jam-${row.id}`).value) || 0;
 
-        // Looping setiap baris penugasan di form
-        document.querySelectorAll('.penugasan-row').forEach(row => { 
-            // PENTING: Gunakan String().trim() agar spasi siluman pada mode EDIT hilang
-            const mapel = String(row.querySelector(`.sel-mapel-${row.id}`).value || '').trim();
-            const kelasArr = Array.from(row.querySelectorAll(`.cb-kelas-${row.id}:checked`)).map(cb => String(cb.value).trim());
-            const jam = parseInt(row.querySelector(`.input-jam-${row.id}`).value) || 0; 
-            
-            if(mapel && kelasArr.length > 0) {
-                // Cari mapel dengan mengabaikan spasi
-                const mapelObj = AppState.data.mapel.find(m => String(m.nama).trim() === mapel);
-                
-                if (mapelObj) {
-                    // --- 1. VALIDASI TINGKAT ---
-                    const invalidKelas = kelasArr.filter(namaKls => {
-                        const kelasObj = AppState.data.kelas.find(k => String(k.nama).trim() === namaKls);
-                        return kelasObj && String(kelasObj.tingkat).trim() !== String(mapelObj.tingkat).trim();
-                    });
+        if (mapelId && kelasArr.length > 0) {
+          // Cari referensi lengkap berdasarkan ID yang unik
+          const mapelObj = AppState.data.mapel.find(m => String(m.id) === String(mapelId));
 
-                    if (invalidKelas.length > 0) {
-                        isValid = false;
-                        pesanError = `Ditolak! Mapel ${mapel} (Tingkat ${mapelObj.tingkat}) tidak bisa diajarkan di Kelas ${invalidKelas.join(', ')}. Beda tingkat!`;
-                        return; // Hentikan pengecekan baris ini
-                    }
+          if (mapelObj) {
+            const mapel = mapelObj.nama; // Ambil namanya untuk disimpan ke database
 
-                    // --- 2. VALIDASI BEBAN JAM ---
-                    const bebanMaks = parseInt(mapelObj.jamPerMinggu) || 0;
-                    if (jam > bebanMaks) {
-                        isValid = false;
-                        pesanError = `Ditolak! Jam ajar (${jam} jam) untuk Mapel ${mapel} melebihi beban maksimal (${bebanMaks} Jam/Minggu).`;
-                        return; // Hentikan pengecekan baris ini
-                    }
-                }
-                
-                penugasan.push({ mapel, kelas: kelasArr, jamAjar: jam }); 
-            } 
-        });
+            // --- AWAL VALIDASI TINGKAT ---
+            const invalidKelas = kelasArr.filter(namaKls => {
+              const kelasObj = AppState.data.kelas.find(k => String(k.nama).trim().toLowerCase() === namaKls.toLowerCase());
+              return kelasObj && String(kelasObj.tingkat).trim() !== String(mapelObj.tingkat).trim();
+            });
 
-        // Hentikan proses simpan dan munculkan notifikasi jika ada yang melanggar
-        if (!isValid) return showToast(pesanError, 'error');
-        if (penugasan.length === 0) return showToast('Minimal 1 Mapel & Kelas harus diisi dengan benar!', 'warning'); 
-        
-        newData.penugasan = penugasan;
+            if (invalidKelas.length > 0) {
+              isValid = false;
+              pesanError = `Ditolak! Mapel ${mapel} (Tingkat ${mapelObj.tingkat}) tidak bisa diajarkan di Kelas ${invalidKelas.join(', ')}. Beda tingkat!`;
+              break; 
+            }
+            // --- AKHIR VALIDASI TINGKAT ---
+
+            // --- AWAL VALIDASI BEBAN JAM ---
+            if (jam > parseInt(mapelObj.jamPerMinggu)) {
+               isValid = false;
+               pesanError = `Ditolak! Input jam per kelas (${jam} jam) melebihi batas beban (${mapelObj.jamPerMinggu} jam/minggu) untuk Mapel ${mapel}.`;
+               break;
+            }
+            // --- AKHIR VALIDASI BEBAN JAM ---
+          }
+
+          penugasan.push({ mapel: mapelObj.nama, kelas: kelasArr, jamAjar: jam });
+        }
+      }
+
+      // Cegah proses simpan jika status isValid menjadi false
+      if (!isValid) return showToast(pesanError, 'error');
+      
+      if (penugasan.length === 0) return showToast('Minimal 1 Mapel & Kelas harus diisi dengan benar!', 'warning');
+      newData.penugasan = penugasan;
+
     }
 
       // --- PERBAIKAN: Validasi Anti-Duplikat Global HANYA untuk Kelas & Guru ---
@@ -885,66 +962,80 @@
     }
 
     function generateJadwalOffline() {
-      if(!confirm("Jadwal akan ditimpa dengan hasil algoritma baru. Lanjutkan?")) return;
-      const d = AppState.data; d.jadwal = [];
-      const hariList = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'].slice(0, d.dashboard.banyakHari);
-      
-      d.kelas.forEach(k => { 
-          hariList.forEach(h => { 
-              let wHari = d.waktuDetail[h] || [];
-              wHari.forEach(w => { 
-                  if(w.tipe === 'istirahat') d.jadwal.push({ hari: h, jam: w.jamKe, kelas: k.nama, mapel: 'ISTIRAHAT', guru: '-' }); 
-              }); 
-          }); 
-      });
+    if(!confirm("Jadwal akan ditimpa dengan hasil algoritma baru. Lanjutkan?")) return;
+    const d = AppState.data;
+    d.jadwal = [];
+    const hariList = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'].slice(0, d.dashboard.banyakHari);
+    
+    // Masukkan waktu istirahat terlebih dahulu
+    d.kelas.forEach(k => {
+        hariList.forEach(h => {
+            let wHari = d.waktuDetail[h] || [];
+            wHari.forEach(w => {
+                if(w.tipe === 'istirahat') d.jadwal.push({ hari: h, jam: w.jamKe, kelas: k.nama, mapel: 'ISTIRAHAT', guru: '-' });
+            });
+        });
+    });
 
-      let guruList = [...d.guru].sort(() => Math.random() - 0.5);
-      guruList.forEach(g => {
-        if(!g.penugasan || g.penugasan.length === 0) return; 
+    // Acak urutan guru dengan Fisher-Yates (Lebih stabil dari Math.random)
+    let guruList = [...d.guru];
+    for (let i = guruList.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [guruList[i], guruList[j]] = [guruList[j], guruList[i]];
+    }
+
+    guruList.forEach(g => {
+        if(!g.penugasan || g.penugasan.length === 0) return;
         const hariAjarGuru = g.hariMengajar ? g.hariMengajar.split(',').map(x=>x.trim()) : hariList;
         
-			g.penugasan.forEach(tugas => { 
-            const mapelObj = d.mapel.find(m => m.nama === tugas.mapel);
-            const batasMingguan = mapelObj && mapelObj.jamPerMinggu ? parseInt(mapelObj.jamPerMinggu) : 999; 
-            
-            tugas.kelas.forEach(kelas => { 
+        g.penugasan.forEach(tugas => {
+            tugas.kelas.forEach(kelas => {
+                // Wajib mencocokkan Tingkat Mapel & Kelas agar tidak error/berhenti
+                const kObj = d.kelas.find(k => String(k.nama).trim() === String(kelas).trim());
+                if(!kObj) return; 
                 
-                // --- AWAL PENGAMANAN GENERATE TINGKAT ---
-                const kelasObj = d.kelas.find(k => k.nama === kelas);
-                // PERBAIKAN: Gunakan String() untuk membandingkan
-                if (mapelObj && kelasObj && String(mapelObj.tingkat).trim() !== String(kelasObj.tingkat).trim()) {
-                    console.warn(`Skip Generate: Mapel ${tugas.mapel} tidak sesuai dengan tingkat Kelas ${kelas}`);
-                    return; // Lompati pembuatan jadwal untuk kombinasi yang salah ini
-                }
-                // --- AKHIR PENGAMANAN GENERATE TINGKAT ---
+                const mapelObj = d.mapel.find(m => 
+                    String(m.nama).trim() === String(tugas.mapel).trim() && 
+                    String(m.tingkat).trim() === String(kObj.tingkat).trim()
+                );
+                
+                if(!mapelObj) return; // Skip jika ternyata ada data beda tingkat yang lolos
 
-                let sisaJam = tugas.jamAjar || 2; 
-                for(let h of hariList) { 
+                const batasMingguan = mapelObj.jamPerMinggu ? parseInt(mapelObj.jamPerMinggu) : 999;
+                let sisaJam = tugas.jamAjar || 2;
+                
+                for(let h of hariList) {
                     if(!hariAjarGuru.includes(h)) continue;
-                    if(sisaJam <= 0) break; 
-                    let wHari = d.waktuDetail[h] || []; 
+                    if(sisaJam <= 0) break;
                     
-                    for(let w of wHari) { 
+                    let wHari = d.waktuDetail[h] || [];
+                    for(let w of wHari) {
                         if(sisaJam <= 0) break;
-                        if(w.tipe === 'istirahat') continue; 
+                        if(w.tipe === 'istirahat') continue;
                         
-                        if (d.jadwal.filter(j => j.kelas === kelas && j.mapel === tugas.mapel).length >= batasMingguan) {
-                            sisaJam = 0; break;
-                        } 
+                        // Hentikan jika mapel di kelas ini sudah memenuhi batas maksimal jam/minggu
+                        if (d.jadwal.filter(j => j.kelas === kelas && j.mapel === tugas.mapel).length >= batasMingguan) { 
+                            sisaJam = 0; 
+                            break; 
+                        }
                         
-                        if(!d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.guru === g.nama) && 
-                           !d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.kelas === kelas)) {
-                            
+                        // Eksekusi penempatan jadwal jika tidak ada bentrok
+                        const bentrokGuru = d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.guru === g.nama);
+                        const bentrokKelas = d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.kelas === kelas);
+                        
+                        if(!bentrokGuru && !bentrokKelas) {
                             d.jadwal.push({ hari: h, jam: w.jamKe, kelas: kelas, mapel: tugas.mapel, guru: g.nama });
                             sisaJam--;
-                        } 
-                    } 
-                } 
+                        }
+                    }
+                }
             });
-			});
-			});
-      saveDB(AppState.data); showToast('Generate selesai!', 'success'); navigateTo('jadwal-edit');
-    }
+        });
+    });
+    saveDB(AppState.data);
+    showToast('Generate selesai!', 'success');
+    navigateTo('jadwal-edit');
+}
 
     function renderJadwal(c, isEditable) {
       const d = AppState.data; if(!d.jadwal || d.jadwal.length === 0) return c.innerHTML = `<div class="card text-center">Belum ada jadwal. Generate terlebih dahulu.</div>`;
@@ -1372,53 +1463,124 @@
     }
 
     function renderManual(c) {
-      const d = AppState.data; let optGuruMapel = `<option value="">-- Pilih Guru Tugas --</option>`;
-      d.guru.forEach(g => { (g.penugasan || []).forEach(p => { optGuruMapel += `<option value="${g.nama}|${p.mapel}">${g.kode} - ${g.nama} (${p.mapel})</option>`; }); });
+    const d = AppState.data; 
+    let optGuruMapel = '<option value="">-- Pilih Penugasan Guru --</option>';
+    d.guru.forEach(g => { 
+        (g.penugasan || []).forEach(p => { 
+            optGuruMapel += `<option value="${g.nama}|${p.mapel}">${g.kode} - ${g.nama} (${p.mapel})</option>`; 
+        }); 
+    });
 
-      c.innerHTML = `
-        <div class="header"><h2><button class="btn-toggle-sidebar" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button> <i class="fas fa-hand-pointer"></i> Input Manual Lanjutan</h2></div>
+    c.innerHTML = `
         <div class="card">
-          <div class="grid grid-2">
-            <div>
-                <div class="form-group"><label class="form-label">Penugasan Guru</label><select id="man-guru" class="form-control">${optGuruMapel}</select></div>
-                <div class="form-group"><label class="form-label">Kelas Target</label><select id="man-kelas" class="form-control" onchange="refreshManualJam()">${d.kelas.map(k=>`<option value="${k.nama}">Kelas ${k.nama}</option>`).join('')}</select></div>
-                <div class="form-group"><label class="form-label">Hari</label><select id="man-hari" class="form-control" onchange="refreshManualJam()">${['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'].slice(0,d.dashboard.banyakHari).map(h=>`<option value="${h}">${h}</option>`).join('')}</select></div>
-                <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="simpanManualLanjut()"><i class="fas fa-save"></i> Simpan Pilihan</button>
+            <div class="card-header"><h3 class="card-title">Input Manual Lanjutan</h3></div>
+            <div class="card-body grid grid-2">
+                <div>
+                    <div class="form-group">
+                        <label class="form-label">Penugasan Guru</label>
+                        <select id="man-guru" class="form-control" onchange="refreshManualKelas()">
+                            ${optGuruMapel}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Kelas Target</label>
+                        <select id="man-kelas" class="form-control" onchange="refreshManualJam()">
+                            <option value="">-- Pilih Penugasan Guru Dulu --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Hari</label>
+                        <select id="man-hari" class="form-control" onchange="refreshManualJam()">
+                            ${['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'].slice(0,d.dashboard.banyakHari).map(h=>`<option value="${h}">${h}</option>`).join('')}
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="simpanManualLanjut()">
+                        <i class="fas fa-save"></i> Simpan Pilihan
+                    </button>
+                </div>
+                <div>
+                    <label class="form-label">Centang Jam Target:</label>
+                    <div id="man-jam-container" style="background:#f8fafc; padding:12px; border-radius:6px; border:1px solid var(--gray-light);"></div>
+                </div>
             </div>
-            <div><label class="form-label">Centang Jam Target:</label><div id="man-jam-container" style="background:#f8fafc; padding:12px; border-radius:6px; border:1px solid var(--gray-light);"></div></div>
-          </div>
         </div>`;
-      setTimeout(refreshManualJam, 100);
+    // Panggil pertama kali untuk mereset tampilan
+    setTimeout(refreshManualKelas, 100);
+}
+
+    window.refreshManualKelas = function() {
+    const comboVal = document.getElementById('man-guru').value;
+    const kelasSelect = document.getElementById('man-kelas');
+    
+    if(!comboVal) {
+        kelasSelect.innerHTML = '<option value="">-- Pilih Penugasan Guru Dulu --</option>';
+        refreshManualJam();
+        return;
+    }
+    
+    const [gNama, mapel] = comboVal.split('|');
+    const guruObj = AppState.data.guru.find(g => g.nama === gNama);
+    let optKelas = '';
+    
+    if(guruObj) {
+        // Cari tugas mapel yang dipilih, dan ambil list kelasnya
+        const tugas = (guruObj.penugasan || []).find(p => p.mapel === mapel);
+        if(tugas && tugas.kelas) {
+            tugas.kelas.forEach(k => {
+                optKelas += `<option value="${k}">Kelas ${k}</option>`;
+            });
+        }
+    }
+    
+    kelasSelect.innerHTML = optKelas || '<option value="">Tidak ada data kelas</option>';
+    refreshManualJam(); // Segarkan tampilan kotak jam otomatis
+}
+
+function simpanManualLanjut() {
+    const comboVal = document.getElementById('man-guru').value;
+    if(!comboVal) return showToast('Pilih Penugasan!', 'warning');
+    
+    const [g, mapel] = comboVal.split('|');
+    const k = document.getElementById('man-kelas').value;
+    const h = document.getElementById('man-hari').value;
+    
+    if(!k) return showToast('Pilih Kelas Target!', 'warning');
+
+    const checkedJams = Array.from(document.querySelectorAll('.cb-man-jam:checked')).map(cb => parseInt(cb.value));
+    if(checkedJams.length === 0) return showToast('Centang jam target!', 'warning');
+    
+    // Keamanan Ganda: Validasi Tingkat Mapel & Kelas
+    const kelasObj = AppState.data.kelas.find(kls => String(kls.nama).trim() === String(k).trim());
+    if(!kelasObj) return showToast('Data kelas tidak valid!', 'error');
+    
+    const mapelObj = AppState.data.mapel.find(m => String(m.nama).trim() === String(mapel).trim() && String(m.tingkat).trim() === String(kelasObj.tingkat).trim());
+    if(!mapelObj) return showToast(`Ditolak! Mapel ${mapel} bukan untuk Kelas ${k} (Tingkat ${kelasObj.tingkat}).`, 'error');
+
+    if(mapelObj && mapelObj.jamPerMinggu) {
+        const terisiSaatIni = AppState.data.jadwal.filter(x => x.kelas === k && x.mapel === mapel).length;
+        let tambahanBaru = 0;
+        for(let j of checkedJams) {
+            const slotLama = AppState.data.jadwal.find(x => x.hari === h && x.jam === j && x.kelas === k);
+            // Jika slot lama bukan mapel yang sama, berarti ini adalah penambahan jam baru
+            if(!slotLama || slotLama.mapel !== mapel) tambahanBaru++;
+        }
+        if (terisiSaatIni + tambahanBaru > parseInt(mapelObj.jamPerMinggu)) {
+            return showToast(`Ditolak! Total jadwal melebihi batas Mapel (${mapelObj.jamPerMinggu} jam/minggu).`, 'error');
+        }
     }
 
-    function simpanManualLanjut() {
-      const comboVal = document.getElementById('man-guru').value; if(!comboVal) return showToast('Pilih Penugasan!', 'warning');
-      const [g, mapel] = comboVal.split('|'); const k = document.getElementById('man-kelas').value; const h = document.getElementById('man-hari').value; 
-      const checkedJams = Array.from(document.querySelectorAll('.cb-man-jam:checked')).map(cb => parseInt(cb.value));
-      if(checkedJams.length === 0) return showToast('Centang jam target!', 'warning');
-
-      const mapelObj = AppState.data.mapel.find(m => m.nama === mapel);
-      if(mapelObj && mapelObj.jamPerMinggu) {
-          const terisiSaatIni = AppState.data.jadwal.filter(x => x.kelas === k && x.mapel === mapel).length;
-          let tambahanBaru = 0;
-          for(let j of checkedJams) {
-              const slotLama = AppState.data.jadwal.find(x => x.hari === h && x.jam === j && x.kelas === k);
-              if(!slotLama || slotLama.mapel !== mapel) tambahanBaru++;
-          }
-          if (terisiSaatIni + tambahanBaru > parseInt(mapelObj.jamPerMinggu)) {
-              return showToast(`Ditolak! Mapel melebihi batas (${mapelObj.jamPerMinggu} jam/minggu).`, 'error');
-          }
-      }
-
-      for(let j of checkedJams) {
-          const b = AppState.data.jadwal.find(x => x.hari===h && x.jam===j && x.guru===g && x.kelas!==k);
-          if(b) return showToast(`Bentrok! ${g} di Kelas ${b.kelas} jam ke-${j}.`, 'error');
-          const idx = AppState.data.jadwal.findIndex(x => x.hari===h && x.jam===j && x.kelas===k);
-          if(idx >= 0) AppState.data.jadwal[idx] = { hari:h, jam:j, kelas:k, mapel, guru:g }; else AppState.data.jadwal.push({ hari:h, jam:j, kelas:k, mapel, guru:g });
-      }
-      saveDB(AppState.data); showToast('Tersimpan!', 'success'); refreshManualJam();
+    for(let j of checkedJams) {
+        const b = AppState.data.jadwal.find(x => x.hari===h && x.jam===j && x.guru===g && x.kelas!==k);
+        if(b) return showToast(`Bentrok! ${g} sudah mengajar di Kelas ${b.kelas} jam ke-${j}.`, 'error');
+        
+        const idx = AppState.data.jadwal.findIndex(x => x.hari===h && x.jam===j && x.kelas===k);
+        if(idx >= 0) AppState.data.jadwal[idx] = { hari:h, jam:j, kelas:k, mapel, guru:g };
+        else AppState.data.jadwal.push({ hari:h, jam:j, kelas:k, mapel, guru:g });
     }
-
+    saveDB(AppState.data);
+    showToast('Tersimpan!', 'success');
+    refreshManualJam();
+}
     // ==========================================
     // REKAPITULASI
     // ==========================================
@@ -1455,17 +1617,39 @@
       if (tab === 'guru') {
         let rekap = d.guru.map(g => {
           let target = 0; (g.penugasan || []).forEach(p => target += (p.kelas.length * (parseInt(p.jamAjar)||0)));
-          let terisi = d.jadwal.filter(j => j.guru === g.nama && j.mapel !== 'ISTIRAHAT').length;
+          
+          let jadwalGuru = d.jadwal.filter(j => j.guru === g.nama && j.mapel !== 'ISTIRAHAT');
+          let terisi = jadwalGuru.length;
+          
+          // Mengelompokkan hari dan jam untuk keterangan waktu mengajar
+          let detailWaktu = '-';
+          if(jadwalGuru.length > 0) {
+              let grouped = {};
+              jadwalGuru.forEach(j => {
+                  if(!grouped[j.hari]) grouped[j.hari] = [];
+                  grouped[j.hari].push(j.jam);
+              });
+              const hariOrder = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+              detailWaktu = Object.keys(grouped)
+                  .sort((a,b) => hariOrder.indexOf(a) - hariOrder.indexOf(b))
+                  .map(h => `<div style="font-size:0.75rem; color:var(--gray);"><b style="color:var(--dark);">${h}</b>: Jam ke-${grouped[h].sort((a,b)=>a-b).join(',')}</div>`)
+                  .join('');
+          }
+
           let listMapelDetails = (g.penugasan || []).map(p=> `<b>${p.mapel}</b> (Kls: ${p.kelas.join(', ')})`).join('<br>');
-          return { nama: g.nama, mapelDetail: listMapelDetails, target, terisi, kurang: target - terisi };
+          return { nama: g.nama, mapelDetail: listMapelDetails, jadwalStr: detailWaktu, target, terisi, kurang: target - terisi };
         });
+        
         if(fVal !== 'Semua') rekap = rekap.filter(r => r.nama === fVal); AppState.currentRekapData = rekap;
-        html += `<table><thead><tr><th>Nama Guru</th><th>Rincian Tugas</th><th>Target Jam</th><th>Aktual</th><th>Status</th></tr></thead>
+        
+        html += `<table><thead><tr><th>Nama Guru</th><th>Rincian Tugas</th><th>Waktu Mengajar</th><th>Target Jam</th><th>Aktual</th><th>Status</th></tr></thead>
             <tbody>${rekap.map(r => `<tr><td style="font-weight:600; color:var(--primary-dark);">${r.nama}</td><td style="font-size:0.75rem">${r.mapelDetail||'-'}</td>
+                  <td>${r.jadwalStr}</td>
                   <td>${r.target} Jam</td><td><strong style="color: ${r.terisi < r.target ? 'red' : 'green'}">${r.terisi} Jam</strong></td>
                   <td>${r.kurang > 0 ? `<span class="badge badge-danger">Kurang ${r.kurang} Jam</span>` : `<span class="badge badge-success">Lengkap</span>`}</td></tr>`).join('')}
             </tbody></table>`;
-      } 
+      }
+	  
       else if (tab === 'kelas') {
         let rekap = d.kelas.map(k => {
           let target = 0; d.guru.forEach(g => { (g.penugasan||[]).forEach(p=>{ if(p.kelas.includes(k.nama)) target += (parseInt(p.jamAjar)||0); }); });
@@ -1500,8 +1684,13 @@
     function exportExcelTabelIni(tab) {
       let wb = XLSX.utils.book_new(); let ws_data = []; const data = AppState.currentRekapData;
       if(tab === 'guru') {
-        ws_data.push(["Nama Guru", "Detail Tugas", "Target Mengajar", "Aktual Terjadwal", "Keterangan"]);
-        data.forEach(r => ws_data.push([r.nama, r.mapelDetail.replace(/<br>/g, '\n').replace(/<b>/g, '').replace(/<\/b>/g, ''), r.target, r.terisi, r.kurang > 0 ? `Kurang ${r.kurang} Jam` : 'Lengkap']));
+        ws_data.push(["Nama Guru", "Detail Tugas", "Waktu Mengajar", "Target Mengajar", "Aktual Terjadwal", "Keterangan"]);
+        data.forEach(r => ws_data.push([
+            r.nama, 
+            r.mapelDetail.replace(/<br>/g, '\n').replace(/<b>/g, '').replace(/<\/b>/g, ''), 
+            r.jadwalStr.replace(/<\/div>/g, '\n').replace(/<[^>]*>?/gm, '').trim(), // Membersihkan elemen HTML jadi teks baris baru
+            r.target, r.terisi, r.kurang > 0 ? `Kurang ${r.kurang} Jam` : 'Lengkap'
+        ]));
       } else if (tab === 'kelas') {
         ws_data.push(["Kelas", "Tingkat", "Kebutuhan Mapel", "Aktual Terjadwal", "Keterangan"]);
         data.forEach(r => ws_data.push([r.nama, r.tingkat, r.target, r.terisi, r.kurang > 0 ? `Sisa ${r.kurang} Jam` : 'Penuh']));
@@ -1720,7 +1909,32 @@ function processRestore(event) {
     // Mereset nilai input agar file yang sama bisa diunggah ulang jika diperlukan
     event.target.value = '';
 }
-	
+
+// ==========================================
+    // FUNGSI PENCARIAN (LIVE SEARCH)
+    // ==========================================
+    window.filterTable = function(tableId, query) {
+        const filter = query.toLowerCase();
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        
+        const rows = table.getElementsByTagName("tbody")[0].getElementsByTagName("tr");
+
+        for (let i = 0; i < rows.length; i++) {
+            let rowText = "";
+            // Gabungkan teks dari semua kolom (kecuali kolom aksi/checkbox)
+            for (let j = 1; j < rows[i].cells.length - 1; j++) {
+                rowText += rows[i].cells[j].textContent || rows[i].cells[j].innerText;
+            }
+
+            // Tampilkan baris jika ada kecocokan teks, sembunyikan jika tidak
+            if (rowText.toLowerCase().indexOf(filter) > -1) {
+                rows[i].style.display = "";
+            } else {
+                rows[i].style.display = "none";
+            }
+        }
+    };
   </script>
 </body>
 </html>
