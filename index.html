@@ -615,59 +615,98 @@
       let newData = { id };
       
       // Ambil data dari form berdasarkan tipe
-      if(type === 'mapel') {
-        newData.kode = document.getElementById('f-kode').value.trim(); 
+      if(type === 'mapel') { 
+        newData.kode = document.getElementById('f-kode').value.trim();
         newData.nama = document.getElementById('f-nama').value.trim();
-        newData.tingkat = document.getElementById('f-tingkat').value; 
-        newData.jamPerMinggu = parseInt(document.getElementById('f-jamMinggu').value);
+        newData.tingkat = document.getElementById('f-tingkat').value.trim(); 
+        newData.jamPerMinggu = parseInt(document.getElementById('f-jamMinggu').value) || 0; 
+
+        // VALIDASI KHUSUS MAPEL (Boleh nama sama asal Beda Tingkat)
+        const isDuplicate = AppState.data.mapel.some(m => {
+            if (m.id === id) return false; 
+            const isTingkatSama = String(m.tingkat || '').trim() === newData.tingkat;
+            const isNamaSama = String(m.nama || '').trim().toLowerCase() === newData.nama.toLowerCase();
+            const isKodeSama = newData.kode !== '' && String(m.kode || '').trim().toLowerCase() === newData.kode.toLowerCase();
+            return isTingkatSama && (isNamaSama || isKodeSama);
+        });
+
+        if (isDuplicate) {
+            return showToast(`Gagal! Mapel "${newData.nama}" atau Kode "${newData.kode}" sudah terdaftar di Tingkat ${newData.tingkat}.`, 'error');
+        }
+
       } else if(type === 'kelas') {
         newData.kode = document.getElementById('f-kode').value.trim(); 
         newData.nama = document.getElementById('f-nama').value.trim(); 
-        newData.tingkat = document.getElementById('f-tingkat').value;
-      } else if(type === 'guru') {
-        newData.kode = document.getElementById('f-kode-guru').value.trim() || '-'; 
-        newData.nama = document.getElementById('f-nama').value.trim();
-        
-        const hariDipilih = Array.from(document.querySelectorAll('.cb-hari:checked')).map(cb => cb.value);
-        if(hariDipilih.length === 0) return showToast('Pilih setidaknya 1 hari ketersediaan!', 'warning');
-        newData.hariMengajar = hariDipilih.join(', ');
-        
+        newData.tingkat = document.getElementById('f-tingkat').value.trim();
+      } else if(type === 'guru') { 
+        newData.kode = document.getElementById('f-kode-guru').value || '-';
+        newData.nama = document.getElementById('f-nama').value;
+
+        const hariDipilih = Array.from(document.querySelectorAll('.cb-hari:checked')).map(cb => cb.value); 
+        if(hariDipilih.length === 0) return showToast('Pilih setidaknya 1 hari ketersediaan!', 'warning'); 
+        newData.hariMengajar = hariDipilih.join(', '); 
+
         let penugasan = [];
-        let validasiAman = true;
-        let pesanError = '';
+        let isValid = true;
+        let pesanError = "";
 
-        document.querySelectorAll('.penugasan-row').forEach(row => {
-          const mapel = row.querySelector(`.sel-mapel-${row.id}`).value; 
-          const kelasArr = Array.from(row.querySelectorAll(`.cb-kelas-${row.id}:checked`)).map(cb => cb.value); 
-          const jam = parseInt(row.querySelector(`.input-jam-${row.id}`).value) || 0;
-          
-          if(mapel && kelasArr.length > 0) {
-            const mObj = AppState.data.mapel.find(m => m.nama === mapel);
-            if (mObj && jam > mObj.jamPerMinggu) {
-              validasiAman = false;
-              pesanError = `Ditolak! Jam ajar ${mapel} (${jam} Jam) melebihi batas maksimal (${mObj.jamPerMinggu} Jam/Minggu).`;
-            }
-            penugasan.push({ mapel, kelas: kelasArr, jamAjar: jam });
-          }
+        // Looping setiap baris penugasan di form
+        document.querySelectorAll('.penugasan-row').forEach(row => { 
+            // PENTING: Gunakan String().trim() agar spasi siluman pada mode EDIT hilang
+            const mapel = String(row.querySelector(`.sel-mapel-${row.id}`).value || '').trim();
+            const kelasArr = Array.from(row.querySelectorAll(`.cb-kelas-${row.id}:checked`)).map(cb => String(cb.value).trim());
+            const jam = parseInt(row.querySelector(`.input-jam-${row.id}`).value) || 0; 
+            
+            if(mapel && kelasArr.length > 0) {
+                // Cari mapel dengan mengabaikan spasi
+                const mapelObj = AppState.data.mapel.find(m => String(m.nama).trim() === mapel);
+                
+                if (mapelObj) {
+                    // --- 1. VALIDASI TINGKAT ---
+                    const invalidKelas = kelasArr.filter(namaKls => {
+                        const kelasObj = AppState.data.kelas.find(k => String(k.nama).trim() === namaKls);
+                        return kelasObj && String(kelasObj.tingkat).trim() !== String(mapelObj.tingkat).trim();
+                    });
+
+                    if (invalidKelas.length > 0) {
+                        isValid = false;
+                        pesanError = `Ditolak! Mapel ${mapel} (Tingkat ${mapelObj.tingkat}) tidak bisa diajarkan di Kelas ${invalidKelas.join(', ')}. Beda tingkat!`;
+                        return; // Hentikan pengecekan baris ini
+                    }
+
+                    // --- 2. VALIDASI BEBAN JAM ---
+                    const bebanMaks = parseInt(mapelObj.jamPerMinggu) || 0;
+                    if (jam > bebanMaks) {
+                        isValid = false;
+                        pesanError = `Ditolak! Jam ajar (${jam} jam) untuk Mapel ${mapel} melebihi beban maksimal (${bebanMaks} Jam/Minggu).`;
+                        return; // Hentikan pengecekan baris ini
+                    }
+                }
+                
+                penugasan.push({ mapel, kelas: kelasArr, jamAjar: jam }); 
+            } 
         });
+
+        // Hentikan proses simpan dan munculkan notifikasi jika ada yang melanggar
+        if (!isValid) return showToast(pesanError, 'error');
+        if (penugasan.length === 0) return showToast('Minimal 1 Mapel & Kelas harus diisi dengan benar!', 'warning'); 
         
-        if (!validasiAman) return showToast(pesanError, 'error');
-        if(penugasan.length === 0) return showToast('Minimal 1 Mapel & Kelas harus diisi dengan benar!', 'warning');
         newData.penugasan = penugasan;
-      }
+    }
 
-      // Validasi Anti-Duplikat
-      let isDuplicate = false;
-      const dataSama = AppState.data[type].find(x => 
-        x.id !== id && // abaikan diri sendiri jika sedang mode Edit
-        (
-          (x.kode && x.kode !== '-' && x.kode.toLowerCase() === newData.kode.toLowerCase()) || 
-          (x.nama && x.nama.toLowerCase() === newData.nama.toLowerCase())
-        )
-      );
+      // --- PERBAIKAN: Validasi Anti-Duplikat Global HANYA untuk Kelas & Guru ---
+      if (type !== 'mapel') {
+          const dataSama = AppState.data[type].find(x => 
+            x.id !== id && 
+            (
+              (x.kode && x.kode !== '-' && String(x.kode).toLowerCase() === String(newData.kode).toLowerCase()) || 
+              (x.nama && String(x.nama).toLowerCase() === String(newData.nama).toLowerCase())
+            )
+          );
 
-      if (dataSama) {
-          return showToast(`Ditolak! Kode atau Nama sudah digunakan.`, 'error');
+          if (dataSama) {
+              return showToast(`Ditolak! Kode atau Nama sudah digunakan.`, 'error');
+          }
       }
       
       // Simpan Data
@@ -682,7 +721,7 @@
       closeModal('modal-form'); 
       showToast('Tersimpan!', 'success'); 
       navigateTo(type);
-    }
+}
 
     function deleteData(type, id) { if(!confirm('Hapus data secara permanen?')) return; AppState.data[type] = AppState.data[type].filter(x => x.id != id); saveDB(AppState.data); showToast('Terhapus!', 'success'); navigateTo(type); }
 
@@ -704,56 +743,107 @@
         let countBaru = 0;
         let countTimpa = 0;
         
-        json.forEach(row => {
-          if(type === 'mapel' && row['Kode']) { 
-            let exist = AppState.data.mapel.find(x => x.kode === row['Kode'] || x.nama.toLowerCase() === row['Nama Mapel'].toLowerCase());
-            if (exist) {
-                exist.kode = row['Kode']; exist.nama = row['Nama Mapel']; exist.tingkat = row['Tingkat']; exist.jamPerMinggu = parseInt(row['Jam Per Minggu']) || 4;
-                countTimpa++;
-            } else {
-                AppState.data.mapel.push({id: Date.now()+Math.random().toString(36).substr(2), kode: row['Kode'], nama: row['Nama Mapel'], tingkat: row['Tingkat'], jamPerMinggu: parseInt(row['Jam Per Minggu']) || 4}); 
-                countBaru++;
+        json.forEach(row => { 
+            // --- IMPORT MAPEL ---
+            if(type === 'mapel' && (row['Nama Mapel'] || row['Nama'])) { 
+                let k = String(row['Kode'] || row['Kode Mapel'] || '').trim();
+                let n = String(row['Nama Mapel'] || row['Nama'] || '').trim();
+                let t = String(row['Tingkat'] || '').trim();
+                let jpm = parseInt(row['Jam Per Minggu']) || 4;
+
+                // Cari apakah ada mapel dengan Kode/Nama sama DI TINGKAT YANG SAMA
+                let existingMapel = AppState.data.mapel.find(m => 
+                    String(m.tingkat || '').trim() === t &&
+                    (
+                      (n !== '' && String(m.nama || '').trim().toLowerCase() === n.toLowerCase()) || 
+                      (k !== '' && String(m.kode || '').trim().toLowerCase() === k.toLowerCase())
+                    )
+                );
+
+                if (existingMapel) {
+                    // Jika ada di tingkat yang sama, TIMPA datanya
+                    existingMapel.kode = k;
+                    existingMapel.nama = n;
+                    existingMapel.jamPerMinggu = jpm;
+                    countTimpa++; 
+                } else {
+                    // Jika tidak ada (atau ada tapi beda tingkat), BUAT BARU
+                    AppState.data.mapel.push({
+                        id: Date.now() + Math.random().toString(36).substr(2), 
+                        kode: k, 
+                        nama: n, 
+                        tingkat: t, 
+                        jamPerMinggu: jpm
+                    }); 
+                    countBaru++; 
+                }
             }
-          }
-          
-          if(type === 'kelas' && row['Kode']) { 
-            let exist = AppState.data.kelas.find(x => x.kode === row['Kode'] || x.nama.toLowerCase() === row['Nama Kelas'].toLowerCase());
-            if (exist) {
-                exist.kode = row['Kode']; exist.nama = row['Nama Kelas']; exist.tingkat = row['Tingkat'];
-                countTimpa++;
-            } else {
-                AppState.data.kelas.push({id: Date.now()+Math.random().toString(36).substr(2), kode: row['Kode'], nama: row['Nama Kelas'], tingkat: row['Tingkat']}); 
-                countBaru++;
+
+            // --- IMPORT KELAS (BLOK INI SEBELUMNYA HILANG) ---
+            else if(type === 'kelas' && (row['Nama Kelas'] || row['Nama'])) {
+                let k = String(row['Kode'] || row['Kode Kelas'] || '').trim();
+                let n = String(row['Nama Kelas'] || row['Nama'] || '').trim();
+                let t = String(row['Tingkat'] || '').trim();
+
+                let existingKelas = AppState.data.kelas.find(kls => 
+                    String(kls.nama || '').trim().toLowerCase() === n.toLowerCase()
+                );
+
+                if (existingKelas) {
+                    existingKelas.kode = k;
+                    existingKelas.tingkat = t;
+                    countTimpa++;
+                } else {
+                    AppState.data.kelas.push({
+                        id: Date.now() + Math.random().toString(36).substr(2),
+                        kode: k, 
+                        nama: n, 
+                        tingkat: t
+                    });
+                    countBaru++;
+                }
             }
-          }
-          
-          if(type === 'guru' && row['Nama Guru']) { 
-             const mapel = row['Mata Pelajaran'] || ''; 
-             const kelasArr = (row['Kelas Ajar']||'').split(',').map(x => x.trim()).filter(x => x);
-             let exist = AppState.data.guru.find(g => (row['Kode Guru'] && row['Kode Guru'] !== '-' && g.kode === row['Kode Guru']) || g.nama.toLowerCase() === row['Nama Guru'].toLowerCase());
-             
-             if (exist) {
-                 if(row['Kode Guru']) exist.kode = row['Kode Guru'];
-                 exist.nama = row['Nama Guru'];
-                 if(row['Hari Mengajar']) exist.hariMengajar = row['Hari Mengajar'];
+
+            // --- IMPORT GURU ---
+            else if(type === 'guru' && row['Nama Guru']) { 
+                 const mapel = String(row['Mata Pelajaran'] || '').trim(); 
+                 const kelasArr = String(row['Kelas Ajar']||'').split(',').map(x => x.trim()).filter(x => x);
+                 const kodeGuru = String(row['Kode Guru'] || '').trim();
+                 const namaGuru = String(row['Nama Guru'] || '').trim();
+
+                 let exist = AppState.data.guru.find(g => 
+                    (kodeGuru && kodeGuru !== '-' && String(g.kode || '') === kodeGuru) || 
+                    String(g.nama || '').toLowerCase() === namaGuru.toLowerCase()
+                 );
                  
-                 // Update penugasan jika ada data mapel dan kelas
-                 if (mapel && kelasArr.length > 0) {
-                     let tugasExist = exist.penugasan.find(p => p.mapel === mapel);
-                     if (tugasExist) {
-                         // Gabungkan array kelas dan pastikan tidak ada duplikat kelas
-                         tugasExist.kelas = [...new Set([...tugasExist.kelas, ...kelasArr])];
-                         tugasExist.jamAjar = parseInt(row['Jam Per Kelas']) || tugasExist.jamAjar || 2;
-                     } else {
-                         exist.penugasan.push({ mapel: mapel, kelas: kelasArr, jamAjar: parseInt(row['Jam Per Kelas']) || 2 });
+                 if (exist) {
+                     if(kodeGuru) exist.kode = kodeGuru;
+                     exist.nama = namaGuru;
+                     if(row['Hari Mengajar']) exist.hariMengajar = String(row['Hari Mengajar']).trim();
+                     
+                     // Update penugasan jika ada data mapel dan kelas
+                     if (mapel && kelasArr.length > 0) {
+                         let tugasExist = exist.penugasan.find(p => p.mapel === mapel);
+                         if (tugasExist) {
+                             // Gabungkan array kelas dan pastikan tidak ada duplikat kelas
+                             tugasExist.kelas = [...new Set([...tugasExist.kelas, ...kelasArr])];
+                             tugasExist.jamAjar = parseInt(row['Jam Per Kelas']) || tugasExist.jamAjar || 2;
+                         } else {
+                             exist.penugasan.push({ mapel: mapel, kelas: kelasArr, jamAjar: parseInt(row['Jam Per Kelas']) || 2 });
+                         }
                      }
+                     countTimpa++;
+                 } else { 
+                     AppState.data.guru.push({ 
+                         id: Date.now() + Math.random().toString(36).substr(2), 
+                         kode: kodeGuru || '-', 
+                         nama: namaGuru, 
+                         hariMengajar: row['Hari Mengajar'] ? String(row['Hari Mengajar']).trim() : 'Senin, Selasa, Rabu, Kamis, Jumat, Sabtu', 
+                         penugasan: (mapel && kelasArr.length > 0) ? [{ mapel: mapel, kelas: kelasArr, jamAjar: parseInt(row['Jam Per Kelas']) || 2 }] : [] 
+                     }); 
+                     countBaru++; 
                  }
-                 countTimpa++;
-             } else { 
-                 AppState.data.guru.push({ id: Date.now() + Math.random().toString(36).substr(2), kode: row['Kode Guru'] || '-', nama: row['Nama Guru'], hariMengajar: row['Hari Mengajar'] || 'Senin, Selasa, Rabu, Kamis, Jumat, Sabtu', penugasan: (mapel && kelasArr.length > 0) ? [{ mapel: mapel, kelas: kelasArr, jamAjar: parseInt(row['Jam Per Kelas']) || 2 }] : [] }); 
-                 countBaru++; 
-             }
-          }
+            }
         });
         
         saveDB(AppState.data); 
@@ -762,8 +852,7 @@
         navigateTo(type);
       }; 
       reader.readAsArrayBuffer(file);
-    }
-
+}
     // ==========================================
     // AUTO GENERATE JADWAL
     // ==========================================
@@ -797,27 +886,46 @@
         if(!g.penugasan || g.penugasan.length === 0) return; 
         const hariAjarGuru = g.hariMengajar ? g.hariMengajar.split(',').map(x=>x.trim()) : hariList;
         
-        g.penugasan.forEach(tugas => {
-          const mapelObj = d.mapel.find(m => m.nama === tugas.mapel); const batasMingguan = mapelObj && mapelObj.jamPerMinggu ? parseInt(mapelObj.jamPerMinggu) : 999;
-          
-          tugas.kelas.forEach(kelas => {
-            let sisaJam = tugas.jamAjar || 2;
-            for(let h of hariList) {
-              if(!hariAjarGuru.includes(h)) continue; if(sisaJam <= 0) break;
-              let wHari = d.waktuDetail[h] || [];
-              
-              for(let w of wHari) {
-                if(sisaJam <= 0) break; if(w.tipe === 'istirahat') continue;
-                if (d.jadwal.filter(j => j.kelas === kelas && j.mapel === tugas.mapel).length >= batasMingguan) { sisaJam = 0; break; }
+			g.penugasan.forEach(tugas => { 
+            const mapelObj = d.mapel.find(m => m.nama === tugas.mapel);
+            const batasMingguan = mapelObj && mapelObj.jamPerMinggu ? parseInt(mapelObj.jamPerMinggu) : 999; 
+            
+            tugas.kelas.forEach(kelas => { 
                 
-                if(!d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.guru === g.nama) && !d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.kelas === kelas)) { 
-                  d.jadwal.push({ hari: h, jam: w.jamKe, kelas: kelas, mapel: tugas.mapel, guru: g.nama }); sisaJam--; 
+                // --- AWAL PENGAMANAN GENERATE TINGKAT ---
+                const kelasObj = d.kelas.find(k => k.nama === kelas);
+                // PERBAIKAN: Gunakan String() untuk membandingkan
+                if (mapelObj && kelasObj && String(mapelObj.tingkat).trim() !== String(kelasObj.tingkat).trim()) {
+                    console.warn(`Skip Generate: Mapel ${tugas.mapel} tidak sesuai dengan tingkat Kelas ${kelas}`);
+                    return; // Lompati pembuatan jadwal untuk kombinasi yang salah ini
                 }
-              }
-            }
-          });
-        });
-      });
+                // --- AKHIR PENGAMANAN GENERATE TINGKAT ---
+
+                let sisaJam = tugas.jamAjar || 2; 
+                for(let h of hariList) { 
+                    if(!hariAjarGuru.includes(h)) continue;
+                    if(sisaJam <= 0) break; 
+                    let wHari = d.waktuDetail[h] || []; 
+                    
+                    for(let w of wHari) { 
+                        if(sisaJam <= 0) break;
+                        if(w.tipe === 'istirahat') continue; 
+                        
+                        if (d.jadwal.filter(j => j.kelas === kelas && j.mapel === tugas.mapel).length >= batasMingguan) {
+                            sisaJam = 0; break;
+                        } 
+                        
+                        if(!d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.guru === g.nama) && 
+                           !d.jadwal.find(jd => jd.hari === h && jd.jam === w.jamKe && jd.kelas === kelas)) {
+                            
+                            d.jadwal.push({ hari: h, jam: w.jamKe, kelas: kelas, mapel: tugas.mapel, guru: g.nama });
+                            sisaJam--;
+                        } 
+                    } 
+                } 
+            });
+			});
+			});
       saveDB(AppState.data); showToast('Generate selesai!', 'success'); navigateTo('jadwal-edit');
     }
 
