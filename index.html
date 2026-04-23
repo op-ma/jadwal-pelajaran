@@ -368,7 +368,21 @@
                     <button class="btn btn-warning" style="flex:1" onclick="saveDashboard(true)"><i class="fas fa-sync"></i> Generate Ulang Waktu</button>
                 </div>
             </div>
+			<div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--gray-light);">
+    <h4 style="margin-bottom: 10px;">Backup & Restore Database</h4>
+    <p style="font-size: 0.8rem; color: var(--gray); margin-bottom: 10px;">Amankan data Anda atau pindahkan ke perangkat lain dengan mengunduh file Backup.</p>
+    <div style="display: flex; gap: 10px;">
+        <button class="btn btn-info" onclick="backupData()">
+            <i class="fas fa-download"></i> Backup Data
+        </button>
+        <button class="btn btn-warning" onclick="triggerRestore()">
+            <i class="fas fa-upload"></i> Restore Data
+        </button>
+        <input type="file" id="restore-file-input" accept=".json" style="display: none;" onchange="processRestore(event)">
+    </div>
+</div>
           </div>
+		  
           <div class="card">
             <div class="card-header"><span class="card-title">Detail Waktu Harian</span></div>
             <div class="form-group">
@@ -377,6 +391,7 @@
                     ${hariAktif.map(h => `<option value="${h}" ${actHari===h?'selected':''}>${h}</option>`).join('')}
                 </select>
             </div>
+			
             <div style="border: 1px solid var(--gray-light); border-radius:4px; margin-bottom:10px; overflow-x: auto;">
               <table id="table-waktu">
                 <thead><tr><th>Jam Ke </th><th>Kategori</th><th>Mulai</th><th>Selesai</th></tr></thead>
@@ -424,6 +439,8 @@
       });
       saveDB(AppState.data); showToast(`Waktu hari ${actHari} berhasil disimpan!`, 'success');
     }
+	
+	
 
     // ==========================================
     // MODAL FORM MANAGER
@@ -1629,6 +1646,80 @@
       });
     }
 	
+	// ==========================================
+// FITUR BACKUP & RESTORE DATABASE
+// ==========================================
+
+function backupData() {
+    // Mengambil seluruh data saat ini dari AppState
+    const dataStr = JSON.stringify(AppState.data, null, 2);
+    
+    // Membuat file Blob berekstensi JSON
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    
+    // Membuat elemen link sementara untuk memicu proses unduhan
+    const a = document.createElement('a');
+    a.href = url;
+    
+    // Menambahkan tanggal hari ini pada nama file
+    const date = new Date().toISOString().split('T')[0];
+    a.download = `Backup_JadwalKu_${date}.json`;
+    
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    // Menampilkan notifikasi sukses memanfaatkan fungsi toast yang sudah ada
+    showToast('File Backup berhasil diunduh!', 'success');
+}
+
+function triggerRestore() {
+    // Memicu klik pada input file yang disembunyikan
+    document.getElementById('restore-file-input').click();
+}
+
+function processRestore(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            // Membaca teks file dan mengubahnya kembali menjadi objek JSON
+            const parsedData = JSON.parse(e.target.result);
+            
+            // Validasi dasar untuk memastikan file yang diunggah adalah file JadwalKu
+            if (!parsedData.dashboard || !parsedData.waktuDetail) {
+                throw new Error("Format file tidak sesuai");
+            }
+
+            if (confirm('PERINGATAN! Seluruh data saat ini akan DITIMPA/DIHAPUS dan diganti dengan data dari file backup. Anda yakin ingin melanjutkan?')) {
+                // Mengganti data sistem saat ini dengan data dari file
+                AppState.data = parsedData;
+                
+                // Menyimpan ke LocalStorage secara permanen
+                saveDB(AppState.data);
+                
+                showToast('Restore berhasil! Memuat ulang sistem...', 'success');
+                
+                // Me-reload halaman agar seluruh antarmuka dan data bawaan diperbarui
+                setTimeout(() => {
+                    location.reload();
+                }, 1500);
+            }
+        } catch (err) {
+            showToast('Gagal memulihkan data. Pastikan file berformat JSON yang valid!', 'error');
+        }
+    };
+    
+    // Membaca file sebagai teks
+    reader.readAsText(file);
+    
+    // Mereset nilai input agar file yang sama bisa diunggah ulang jika diperlukan
+    event.target.value = '';
+}
 	
   </script>
 </body>
